@@ -1,6 +1,6 @@
 # CTE Tool
 
-CTE Tool is a PowerShell utility for analyzing CipherTrust Transparent Encryption (CTE) agent logs and providing detailed information about users and processes that have accessed guarded resources. The tool specifically focuses on LEARN MODE logs, helping administrators determine access patterns before applying enforcement policies.
+CTE Tool is a PowerShell utility for analyzing CipherTrust Transparent Encryption (CTE) agent logs on Windows and providing detailed information about users and processes that have accessed guarded resources. The tool specifically focuses on LEARN MODE logs, helping administrators determine access patterns before applying enforcement policies.
 
 ## Overview
 
