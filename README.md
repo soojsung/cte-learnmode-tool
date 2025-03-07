@@ -123,4 +123,4 @@ https://github.com/thalescpl-io/CipherTrust_Transparent_Encryption/tree/main/too
 
 ## Version
 
-3.0 
+1.0 
