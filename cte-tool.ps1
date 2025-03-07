@@ -255,20 +255,39 @@ class LogModel {
             if ([string]::IsNullOrEmpty($dirPath) -and $path -match '^[A-Za-z]:$') {
                 $dirPath = $path
             }
-            
-            # Add the specific directory as a potential guardpoint
-            if (-not [string]::IsNullOrEmpty($dirPath) -and -not ($this.GuardPoints -contains $dirPath)) {
-                [void]$this.GuardPoints.Add($dirPath)
+
+            # SQL Server data path detection
+            if ($path -match '^([A-Za-z]:\\Program Files\\Microsoft SQL Server\\[^\\]+\\MSSQL\\DATA)') {
+                $sqlDataPath = $matches[1]
+                if (-not ($this.GuardPoints -contains $sqlDataPath)) {
+                    [void]$this.GuardPoints.Add($sqlDataPath)
+                }
+                return
             }
-            
-            # Extract the first level subfolder under the drive as potential guardpoint
-            # Example: For C:\Temp2\file.txt or C:\Temp2\, extract C:\Temp2
-            if (-not [string]::IsNullOrEmpty($path)) {
-                $match = [regex]::Match($path, '^([A-Za-z]:\\[^\\]+)')
-                if ($match.Success) {
-                    $topLevelFolder = $match.Groups[1].Value
-                    if (-not ($this.GuardPoints -contains $topLevelFolder)) {
-                        [void]$this.GuardPoints.Add($topLevelFolder)
+
+            # Add the specific directory as a potential guardpoint
+            if (-not [string]::IsNullOrEmpty($dirPath)) {
+                # Check for common application data paths that should be considered as guardpoints
+                $potentialGuardpoints = @()
+
+                # Add the immediate parent directory
+                $potentialGuardpoints += $dirPath
+
+                # Add SQL Server related paths
+                if ($dirPath -match '\\Microsoft SQL Server\\') {
+                    $sqlMatch = [regex]::Match($dirPath, '^([A-Za-z]:\\Program Files\\Microsoft SQL Server\\[^\\]+\\MSSQL\\[^\\]+)')
+                    if ($sqlMatch.Success) {
+                        $potentialGuardpoints += $sqlMatch.Groups[1].Value
+                    }
+                }
+
+                # Add other application-specific paths here as needed
+                # Example: if ($dirPath -match '\\AppName\\') { ... }
+
+                # Add each potential guardpoint if it's not already in the list
+                foreach ($guardpoint in $potentialGuardpoints) {
+                    if (-not ($this.GuardPoints -contains $guardpoint)) {
+                        [void]$this.GuardPoints.Add($guardpoint)
                     }
                 }
             }
@@ -304,28 +323,20 @@ class LogModel {
             # Check for various resource path patterns to extract guardpoints
             $guardPointPath = $null
             
-            # Pattern 1: Standard Windows path with first level folder (C:\Folder\file.txt)
-            if ($resourcePath -match '^([A-Za-z]:\\[^\\]+)') {
+            # Pattern 1: SQL Server data paths
+            if ($resourcePath -match '^([A-Za-z]:\\Program Files\\Microsoft SQL Server\\[^\\]+\\MSSQL\\DATA)') {
                 $guardPointPath = $matches[1]
             }
-            # Pattern 2: Root drive only (C:\ or C:)
-            elseif ($resourcePath -match '^([A-Za-z]:\\?)$') {
-                $guardPointPath = $matches[1].TrimEnd('\')
+            # Pattern 2: SQL Server specific paths
+            elseif ($resourcePath -match '^([A-Za-z]:\\Program Files\\Microsoft SQL Server\\[^\\]+\\MSSQL\\[^\\]+)') {
+                $guardPointPath = $matches[1]
             }
             # Pattern 3: Try to get the directory name
             else {
                 try {
                     $dirPath = [System.IO.Path]::GetDirectoryName($resourcePath)
                     if (-not [string]::IsNullOrEmpty($dirPath)) {
-                        if ($dirPath -match '^([A-Za-z]:\\[^\\]+)') {
-                            $guardPointPath = $matches[1]
-                        }
-                        else {
-                            # If no first-level folder match, try to get the drive root
-                            if ($dirPath -match '^([A-Za-z]:)') {
-                                $guardPointPath = $matches[1]
-                            }
-                        }
+                        $guardPointPath = $dirPath
                     }
                 }
                 catch {
