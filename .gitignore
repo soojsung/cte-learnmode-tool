@@ -1,0 +1,27 @@
+# Specific log files
+vorvmd.log
+
+# Log file patterns
+*.log
+*.log.*
+logs/
+
+# Windows-specific files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# PowerShell outputs
+*.exe
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+*.ps1.log
+
+# Temp files
+*.tmp
+*.temp
+*~ 

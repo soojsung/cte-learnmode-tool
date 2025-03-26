@@ -163,15 +163,17 @@ class LogEntry {
     [string]$ProcessName
     [string]$ResourcePath
     [string]$ActionName
+    [string[]]$UserGroups = @()
     [int]$Count = 1
     
-    LogEntry([string]$policy, [string]$user, [string]$domain, [string]$process, [string]$resource, [string]$action) {
+    LogEntry([string]$policy, [string]$user, [string]$domain, [string]$process, [string]$resource, [string]$action, [string[]]$groups) {
         $this.Policy = $policy
         $this.UserName = $user
         $this.UserDomain = $domain
         $this.ProcessName = $process
         $this.ResourcePath = $resource
         $this.ActionName = $action
+        $this.UserGroups = $groups
     }
     
     [string] ToString() {
@@ -232,6 +234,13 @@ class LogModel {
         
         if ($existingEntry) {
             $existingEntry.Count++
+            
+            # Merge any new groups into the existing entry's groups
+            foreach ($group in $entry.UserGroups) {
+                if (-not $existingEntry.UserGroups.Contains($group)) {
+                    $existingEntry.UserGroups += $group
+                }
+            }
         }
         else {
             [void]$this.Entries.Add($entry)
@@ -390,12 +399,270 @@ class LogModel {
                 $users = $guardPointEntries | Group-Object -Property UserName, UserDomain | Sort-Object Count -Descending
                 
                 foreach ($user in $users | Select-Object -First $script:MAX_ITEMS_TO_DISPLAY) {
-                    $userParts = $user.Name -split ', '
-                    $userName = $userParts[0]
+                    # Get raw value for parsing
+                    $rawUserName = $user.Name
+                    
+                    # Clean up the username by removing group information
+                    # Format: "userName, domain" or just "userName"
+                    $userParts = $rawUserName -split ', '
+                    $rawName = $userParts[0]  # This might still have groups in it
                     $domain = if ($userParts.Count -gt 1) { $userParts[1] } else { "" }
-                    $displayName = Format-UserDomain -Domain $domain -UserName $userName
+                    
+                    # System account special case
+                    if ($rawName -match 'SYSTEM\\\\NT AUTHORITY' -or ($domain -eq "NT AUTHORITY" -and $rawName -eq "SYSTEM")) {
+                        $domain = "NT AUTHORITY"
+                        $userName = "SYSTEM"
+                        $displayName = "NT AUTHORITY\SYSTEM"
+                    }
+                    # Extract username from potential group info for regular cases
+                    else {
+                        # Extract just username without groups
+                        $cleanName = $rawName
+                        
+                        # Check for "domain\user" format with possible groups
+                        if ($cleanName -match '^([^\\,]+)\\([^\\,@]+)') {
+                            # Found standard domain\user format
+                            $domain = $matches[1]
+                            $userName = $matches[2]
+                        }
+                        # Check for service accounts
+                        elseif ($domain -eq "NT SERVICE") {
+                            $userName = $cleanName
+                            if ($userName -match '^([^,@]+)') {
+                                # Extract just the username part before any group info
+                                $userName = $matches[1]
+                            }
+                        }
+                        # Other formats - just use raw name but remove group info
+                        else {
+                            if ($cleanName -match '^([^,@\\]+)') {
+                                $userName = $matches[1]
+                            } else {
+                                $userName = $cleanName
+                            }
+                        }
+                        
+                        # Format display name with domain if available
+                        if (-not [string]::IsNullOrEmpty($domain)) {
+                            $displayName = "$domain\$userName"
+                        } else {
+                            # Add specific domain mappings for known usernames from the log data
+                            $knownDomains = @{
+                                "SYSTEM" = "NT AUTHORITY"
+                                "soojae" = "LAB"
+                                "soojae2" = "LAB"
+                                "MSSQLSERVER" = "NT SERVICE"
+                            }
+                            
+                            if ($knownDomains.ContainsKey($userName)) {
+                                $domain = $knownDomains[$userName]
+                                $displayName = "$domain\$userName"
+                            }
+                            # For other users without domain, check if we can determine a domain from context
+                            elseif ($guardPointEntries | Where-Object { 
+                                $_.UserName -eq $userName -and -not [string]::IsNullOrEmpty($_.UserDomain) 
+                            }) {
+                                $possibleDomain = ($guardPointEntries | Where-Object { 
+                                    $_.UserName -eq $userName -and -not [string]::IsNullOrEmpty($_.UserDomain) 
+                                } | Select-Object -First 1).UserDomain
+                                
+                                if (-not [string]::IsNullOrEmpty($possibleDomain)) {
+                                    $displayName = "$possibleDomain\$userName"
+                                } else {
+                                    $displayName = $userName
+                                }
+                            } else {
+                                $displayName = $userName
+                            }
+                        }
+                    }
                     
                     Write-Host "    $($script:UNICODE_BULLET) $displayName ($($user.Count) accesses)" -ForegroundColor Gray
+                    
+                    # Get all distinct groups for this user across all entries
+                    # Match any entries that have the same UserName/UserDomain or match the raw name format
+                    $userEntries = $guardPointEntries | Where-Object { 
+                        ($_.UserName -eq $userName -and $_.UserDomain -eq $domain) -or
+                        # Also check for matches in the original format from the logs
+                        ($rawUserName -match "$($_.UserName)" -and $_.UserDomain -eq $domain) -or
+                        ($rawUserName -match "$($_.UserName)" -and $rawUserName -match "$($_.UserDomain)")
+                    }
+                    
+                    # Extract all groups from all matching entries
+                    $allGroups = @()
+                    foreach ($entry in $userEntries) {
+                        if ($entry.UserGroups -and $entry.UserGroups.Count -gt 0) {
+                            $allGroups += $entry.UserGroups
+                        }
+                    }
+                    $allGroups = $allGroups | Select-Object -Unique
+                    
+                    # Display group information if available
+                    if ($allGroups -and $allGroups.Count -gt 0) {
+                        # Remove meaningless groups like backslashes
+                        $filteredGroups = $allGroups | Where-Object { 
+                            $_ -ne "\" -and
+                            $_ -ne "\\" -and 
+                            $_ -ne "" -and
+                            -not [string]::IsNullOrWhiteSpace($_)
+                        }
+                        
+                        # Skip displaying groups if we only have meaningless entries
+                        if ($filteredGroups.Count -eq 0) {
+                            # No meaningful groups to display, but continue processing other users
+                            continue
+                        }
+                        
+                        # Categorize groups by type and domain
+                        $categorizedGroups = @{
+                            "Security Groups" = @()
+                            "Domain Groups" = @()
+                            "Mandatory Labels" = @()
+                            "Server Groups" = @()
+                            "Other Groups" = @()
+                        }
+                        
+                        # Special group patterns for categorization
+                        $securityGroupPatterns = @("Administrators", "Users", "Domain Admins", "Enterprise Admins", "Schema Admins", "Policy Creator")
+                        $mandatoryLabelPatterns = @("Mandatory Label")
+                        $serverGroupPatterns = @("@DOMAINSERVER", "@localhost")
+                        
+                        foreach ($group in $filteredGroups) {
+                            $categorized = $false
+                            
+                            # Skip empty or meaningless groups
+                            if ([string]::IsNullOrWhiteSpace($group) -or $group -eq "\" -or $group -eq "\\") {
+                                continue
+                            }
+                            
+                            # Categorize by pattern matching
+                            foreach ($pattern in $securityGroupPatterns) {
+                                if ($group -match $pattern) {
+                                    $categorizedGroups["Security Groups"] += $group
+                                    $categorized = $true
+                                    break
+                                }
+                            }
+                            
+                            if (-not $categorized) {
+                                foreach ($pattern in $mandatoryLabelPatterns) {
+                                    if ($group -match $pattern) {
+                                        $categorizedGroups["Mandatory Labels"] += $group
+                                        $categorized = $true
+                                        break
+                                    }
+                                }
+                            }
+                            
+                            if (-not $categorized) {
+                                foreach ($pattern in $serverGroupPatterns) {
+                                    if ($group -match $pattern) {
+                                        $categorizedGroups["Server Groups"] += $group
+                                        $categorized = $true
+                                        break
+                                    }
+                                }
+                            }
+                            
+                            # Check if the current value exists in the hashtable to avoid any errors
+                            if (-not $categorized -and ($group -match '\\\\' -or $group -match '\.')) {
+                                $categorizedGroups["Domain Groups"] += $group
+                                $categorized = $true
+                            }
+                            
+                            # If not categorized by now, put in Other
+                            if (-not $categorized) {
+                                $categorizedGroups["Other Groups"] += $group
+                            }
+                        }
+                        
+                        # Check if there are any groups to display at all
+                        $hasAnyGroups = $false
+                        foreach ($category in $categorizedGroups.Keys) {
+                            $groups = $categorizedGroups[$category] | Sort-Object
+                            # Only count categories with at least one non-empty group
+                            if ($groups.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace(($groups | Select-Object -First 1))) {
+                                $hasAnyGroups = $true
+                                break
+                            }
+                        }
+                        
+                        # Display group membership section if there are actual groups to show
+                        if ($hasAnyGroups) {
+                            Write-Host "      Group Memberships:" -ForegroundColor DarkGray
+                            
+                            foreach ($category in $categorizedGroups.Keys) {
+                                $groups = $categorizedGroups[$category] | Sort-Object
+                                
+                                # Only display categories that have at least one non-empty group
+                                if ($groups.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace(($groups | Select-Object -First 1))) {
+                                    Write-Host "        $($category):" -ForegroundColor DarkGray
+                                    
+                                    # Group by domain if they have domain qualifiers
+                                    $domainGroups = @{}
+                                    $plainGroups = @()
+                                    
+                                    foreach ($group in $groups) {
+                                        if ($group -match '@(.+)$') {
+                                            $domain = $matches[1]
+                                            $groupName = $group -replace '@.+$', ''
+                                            
+                                            # Don't add empty group names
+                                            if (-not [string]::IsNullOrWhiteSpace($groupName)) {
+                                                if (-not $domainGroups.ContainsKey($domain)) {
+                                                    $domainGroups[$domain] = @()
+                                                }
+                                                $domainGroups[$domain] += $groupName
+                                            }
+                                        }
+                                        else {
+                                            # Don't add empty groups
+                                            if (-not [string]::IsNullOrWhiteSpace($group)) {
+                                                $plainGroups += $group
+                                            }
+                                        }
+                                    }
+                                    
+                                    # Display domain-qualified groups
+                                    foreach ($domain in $domainGroups.Keys | Sort-Object) {
+                                        $domainGroupList = $domainGroups[$domain] | Sort-Object -Unique
+                                        
+                                        # Only display domains that have at least one group
+                                        if ($domainGroupList.Count -gt 0) {
+                                            # Clean up any extra backslashes in domain names
+                                            $cleanDomain = $domain -replace '\\+', '\'
+                                            Write-Host "          Domain: $cleanDomain" -ForegroundColor DarkGray
+                                            foreach ($group in $domainGroupList) {
+                                                # Clean up any extra backslashes in group names
+                                                $cleanGroup = $group -replace '\\+', '\'
+                                                Write-Host "            $($script:UNICODE_BULLET) $cleanGroup" -ForegroundColor DarkGray
+                                            }
+                                        }
+                                    }
+                                    
+                                    # Display non-domain groups
+                                    if ($plainGroups.Count -gt 0) {
+                                        if ($domainGroups.Count -gt 0) {
+                                            Write-Host "          General Groups:" -ForegroundColor DarkGray
+                                        }
+                                        foreach ($group in ($plainGroups | Sort-Object -Unique)) {
+                                            # Clean up the display by removing any trailing domain indicators
+                                            $cleanGroup = $group -replace '\\\\.*$', ''
+                                            # Remove leading single backslash in group names
+                                            $cleanGroup = $cleanGroup -replace '^\\', ''
+                                            # Clean up any remaining double backslashes
+                                            $cleanGroup = $cleanGroup -replace '\\+', '\'
+                                            
+                                            # Don't display empty groups
+                                            if (-not [string]::IsNullOrWhiteSpace($cleanGroup)) {
+                                                Write-Host "            $($script:UNICODE_BULLET) $cleanGroup" -ForegroundColor DarkGray
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 
                 if ($users.Count -gt $script:MAX_ITEMS_TO_DISPLAY) {
@@ -573,39 +840,91 @@ function Parse-LogLine {
 
         $policy = $match.Groups['POLICY'].Value
         
-        # Parse Windows-style user information
+        # Get the raw user information from the log
         $userInfo = $match.Groups['USER'].Value
         
-        # Create user information
-        $userName = $userInfo
+        # Initialize variables
+        $userName = ""
         $domain = ""
+        $userGroups = @()
         
-        # Check if there's a domain part (contains \ character)
-        if ($userInfo -match '\\') {
-            $parts = $userInfo -split '\\'
-            if ($parts.Count -ge 2) {
-                # Last part could be a domain suffix after groups list, check if it contains @ or , 
-                $lastPart = $parts[-1]
-                if ($lastPart -match ',|@') {
-                    # This is part of groups list, so username is second-last part
-                    $userName = $parts[-2]
-                    # Domain is first part
-                    $domain = $parts[0]
-                } else {
-                    # Normal case - username is last part
-                    $userName = $lastPart
-                    # Domain is first part
-                    $domain = $parts[0]
+        # Extract format examples from logs:
+        # 1. "SYSTEM\\\\NT AUTHORITY"
+        # 2. "soojae\\Domain Users,Domain Admins,...\\LAB,lab.au.safenet-inc.com"
+        
+        # Special handling for SYSTEM account
+        if ($userInfo -match 'SYSTEM\\\\NT AUTHORITY' -or $userInfo -match 'NT AUTHORITY\\SYSTEM') {
+            $domain = "NT AUTHORITY"
+            $userName = "SYSTEM"
+        }
+        # Handle complex format: username\groups\domain,domain
+        elseif ($userInfo -match '^([^\\]+)\\(.+)\\\\([^,]+),?(.*)$') {
+            # Example: soojae\groups\LAB,domain.com
+            $userName = $matches[1]  # Username
+            $groupsPart = $matches[2]  # Groups part
+            $domain = $matches[3]  # Primary domain
+            $otherDomain = $matches[4]  # Other domain info if any
+            
+            # Extract groups from the groups part
+            $groupList = $groupsPart -split ','
+            foreach ($group in $groupList) {
+                $cleanGroup = $group.Trim()
+                if (-not [string]::IsNullOrWhiteSpace($cleanGroup)) {
+                    $userGroups += $cleanGroup
+                }
+            }
+            
+            # Add domain-qualified groups
+            if ($userInfo -match '@([^,]+)') {
+                $domainQualified = $matches[1]
+                $userGroups += "Domain: $domainQualified"
+            }
+            
+            # Add any others from otherDomain
+            if (-not [string]::IsNullOrWhiteSpace($otherDomain)) {
+                $userGroups += "Domain: $otherDomain"
+            }
+        }
+        # Basic domain\user format
+        elseif ($userInfo -match '^([^\\]+)\\([^\\,@]+)') {
+            $domain = $matches[1]
+            $userName = $matches[2]
+            
+            # Check for group information after the username
+            if ($userInfo -match '^[^\\]+\\[^\\,@]+,(.+)$') {
+                $groupList = $matches[1] -split ','
+                foreach ($group in $groupList) {
+                    $cleanGroup = $group.Trim()
+                    if (-not [string]::IsNullOrWhiteSpace($cleanGroup)) {
+                        $userGroups += $cleanGroup
+                    }
                 }
             }
         }
+        # Fallback for any other format
+        else {
+            $userName = $userInfo
+        }
+        
+        # Also look for @ patterns which indicate domain-qualified groups
+        $atMatches = [regex]::Matches($userInfo, '([^@,]+)@([^,]+)')
+        foreach ($atMatch in $atMatches) {
+            if ($atMatch.Groups.Count -ge 3) {
+                $groupName = $atMatch.Groups[1].Value.Trim() 
+                $groupDomain = $atMatch.Groups[2].Value.Trim()
+                $userGroups += "$groupName@$groupDomain"
+            }
+        }
+        
+        # Deduplicate groups
+        $userGroups = $userGroups | Select-Object -Unique
         
         $process = $match.Groups['PROCESS'].Value
         $resource = $match.Groups['RESOURCE'].Value
         $action = $match.Groups['ACTION'].Value
         
         # Create and add a log entry to the model
-        $entry = [LogEntry]::new($policy, $userName, $domain, $process, $resource, $action)
+        $entry = [LogEntry]::new($policy, $userName, $domain, $process, $resource, $action, $userGroups)
         $LogModel.AddEntry($entry)
         
         return $true
@@ -754,18 +1073,26 @@ function Format-UserDomain {
         return $UserName
     }
     
+    # Handle special case for SYSTEM account
+    if ($Domain -eq "NT AUTHORITY" -and $UserName -eq "SYSTEM") {
+        return "NT AUTHORITY\SYSTEM"
+    }
+    
     # Clean up backslashes
     $cleanDomain = $Domain.Replace('\\', '\')
+    $cleanUserName = $UserName
     
-    # If the domain contains commas or @ symbols, it's likely a complex domain with groups
-    # Just take the first part before any commas or @ symbols
-    if ($cleanDomain -match '[,@]') {
-        $simpleDomain = $cleanDomain -split '[,@]' | Select-Object -First 1
-        return "$simpleDomain\$UserName"
+    # Handle complex username with group information
+    if ($cleanUserName -match ',|@|\\\\') {
+        # Username contains commas, @ signs, or double backslashes (likely groups)
+        # Extract just the username part before any of these special characters
+        if ($cleanUserName -match '^([^,@\\]+)') {
+            $cleanUserName = $matches[1]
+        }
     }
     
     # Standard domain\user format
-    return "$cleanDomain\$UserName"
+    return "$cleanDomain\$cleanUserName"
 }
 
 # =========================== MAIN SCRIPT ===========================

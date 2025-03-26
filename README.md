@@ -18,6 +18,10 @@ This tool helps security administrators analyse access to resources protected by
 - Comprehensive breakdown of user, process, and resource access
 - Classification of access actions (reading, writing, creating, etc.)
 - Support for multiple log files with aggregated results
+- Intelligent guardpoint detection for SQL Server and other applications
+- Proper handling of domain users and groups with clean display format
+- Special case handling for system accounts and service accounts
+- Categorized group membership display (Security Groups, Domain Groups, etc.)
 
 ## Requirements
 
@@ -56,31 +60,50 @@ The tool organizes output by detected guardpoint folders:
 For each guardpoint, the tool displays:
 
 ```
-=== GUARDPOINT: C:\Temp2 (92 accesses) ===
+=== GUARDPOINT: C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\DATA (368 accesses) ===
+
   Statistics:
-    - Users: 3
-    - Processes: 4
-    - Resources: 4
-    - Access Events: 92
+    - Users: 2
+    - Processes: 3
+    - Resources: 12
+    - Access Events: 368
 
   Users:
-    - Administrator\ (7 accesses)
-    - Administrator\LAB (6 accesses)
-    - SYSTEM\NT AUTHORITY (4 accesses)
+    - NT SERVICE\MSSQLSERVER (37 accesses)
+      Group Memberships:
+        Mandatory Labels:
+          Domain: Mandatory Label
+            - High Mandatory Level
+        Server Groups:
+          Domain: DOMAINSERVER
+            - Certificate Service DCOM Access
+        Security Groups:
+          Domain: localhost
+            - Users
+    - NT AUTHORITY\SYSTEM (2 accesses)
 
   Processes:
-    - explorer.exe (9 accesses)
-      Path: C:\Windows\explorer.exe
-    - notepad.exe (4 accesses)
-    [Additional processes...]
+    - sqlservr.exe (37 accesses)
+      Path: C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\Binn\sqlservr.exe
+    - MsMpEng.exe (1 accesses)
+      Path: C:\ProgramData\Microsoft\Windows Defender\platform\4.18.2105.3-0\MsMpEng.exe
 
   Resources:
-    - C:\Temp2\ (8 accesses)
+    - C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\DATA\tempdb.mdf (4 accesses)
+      Common action: reading meta
+    - C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\DATA\ (2 accesses)
       Common action: listing
-    - C:\Temp2\Test.txt (7 accesses)
-      Common action: reading
-    [Additional resources...]
 ```
+
+### Group Membership Display
+
+The tool categorizes group memberships for better readability:
+
+- Security Groups (Administrators, Users, Domain Admins, etc.)
+- Domain Groups (domain-specific groups)
+- Mandatory Labels (security contexts)
+- Server Groups (server-specific groups)
+- Other Groups (uncategorized groups)
 
 ### Summary
 
@@ -88,20 +111,37 @@ The tool provides an overall summary of activity:
 
 ```
 === SUMMARY ===
-  Total Users: 6
-  Total Processes: 8
-  Total Resources: 23
-  Detected GuardPoints: 5
-  Total Access Events: 2650
+  Total Users: 4
+  Total Processes: 5
+  Total Resources: 18
+  Detected GuardPoints: 3
+  Total Access Events: 414
 ```
 
 ## How It Works
 
 1. The tool finds all CTE log files in the specified directory
 2. It extracts information from LEARN MODE log entries only
-3. The script identifies guardpoint folders from resource paths
-4. Access information is grouped by guardpoint 
-5. Results are displayed in a structured, readable format
+3. The script identifies guardpoint folders from resource paths with intelligent detection
+4. User and group information is parsed and categorized
+5. Access information is grouped by guardpoint with detailed statistics
+6. Results are displayed in a structured, readable format
+
+## Advanced Features
+
+### Intelligent Guardpoint Detection
+
+The tool automatically identifies guardpoint folders based on common patterns:
+- SQL Server data and application paths
+- Standard directory structures
+- System paths with access patterns
+
+### User and Group Handling
+
+- Proper formatting of usernames as "DOMAIN\USER"
+- Special handling for system accounts like "NT AUTHORITY\SYSTEM"
+- Categorization of group memberships by type
+- Filtering of meaningless group entries
 
 ## Troubleshooting
 
@@ -113,8 +153,15 @@ If no log files are found, verify you're pointing to the correct directory conta
 
 If the tool runs but shows no data, verify:
 - The log files contain CTE agent logs
-- There are LEARN MODE entries in the logs
+- There are LEARN MODE entries in the logs (not just AUDIT entries)
 - The files are readable by your user account
+
+### Access Permission Issues
+
+If you encounter access permission errors:
+- Try running as Administrator
+- Check that the log files aren't locked by another process
+- Verify read permissions on the log directory
 
 ## Credits
 
@@ -123,4 +170,4 @@ https://github.com/thalescpl-io/CipherTrust_Transparent_Encryption/tree/main/too
 
 ## Version
 
-1.0 
+3.0 
