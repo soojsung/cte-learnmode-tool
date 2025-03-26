@@ -22,6 +22,8 @@ This tool helps security administrators analyse access to resources protected by
 - Proper handling of domain users and groups with clean display format
 - Special case handling for system accounts and service accounts
 - Categorized group membership display (Security Groups, Domain Groups, etc.)
+- Accurate statistics for each guardpoint and overall summary
+- Clean formatting of usernames, domain names, and group names
 
 ## Requirements
 
@@ -74,11 +76,22 @@ For each guardpoint, the tool displays:
         Mandatory Labels:
           Domain: Mandatory Label
             - High Mandatory Level
+            - MSSQLSERVER\High Mandatory Level
+          General Groups:
+            - Domain: Mandatory Label
         Server Groups:
           Domain: DOMAINSERVER
             - Certificate Service DCOM Access
-        Security Groups:
+            - Pre-Windows 2000 Compatible Access
           Domain: localhost
+            - Certificate Service DCOM Access
+            - Pre-Windows 2000 Compatible Access
+        Security Groups:
+          Domain: DOMAINSERVER
+            - Users
+          Domain: localhost
+            - Users
+          Domain: localhost\NT SERVICE
             - Users
     - NT AUTHORITY\SYSTEM (2 accesses)
 
@@ -97,13 +110,15 @@ For each guardpoint, the tool displays:
 
 ### Group Membership Display
 
-The tool categorizes group memberships for better readability:
+The tool categorizes group memberships for better readability and organization:
 
-- Security Groups (Administrators, Users, Domain Admins, etc.)
-- Domain Groups (domain-specific groups)
-- Mandatory Labels (security contexts)
-- Server Groups (server-specific groups)
-- Other Groups (uncategorized groups)
+- **Security Groups**: Administrative and user-related groups (Administrators, Users, Domain Admins, etc.)
+- **Domain Groups**: Groups associated with specific domains
+- **Mandatory Labels**: Security contexts and integrity levels
+- **Server Groups**: Groups specific to server roles
+- **Other Groups**: Groups that don't fit into the categories above
+
+Each group name is properly formatted to remove extraneous backslashes and clearly shows domain relationships where applicable. Groups are further organized by domain to provide a hierarchical view that makes it easier to understand user permissions.
 
 ### Summary
 
@@ -138,10 +153,13 @@ The tool automatically identifies guardpoint folders based on common patterns:
 
 ### User and Group Handling
 
-- Proper formatting of usernames as "DOMAIN\USER"
+- Proper formatting of usernames as "DOMAIN\USER" with consistent display
 - Special handling for system accounts like "NT AUTHORITY\SYSTEM"
-- Categorization of group memberships by type
-- Filtering of meaningless group entries
+- Intelligent cleaning of backslashes in domain and group names
+- Removal of leading backslashes and normalization of multiple backslashes
+- Categorization of group memberships by type for better organization
+- Filtering of meaningless or empty group entries
+- Accurate user count statistics for all guardpoints
 
 ## Troubleshooting
 

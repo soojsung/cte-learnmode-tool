@@ -383,8 +383,14 @@ class LogModel {
                 
                 Write-Host "`n=== GUARDPOINT: $guardPoint ($accessCount accesses) ===" -ForegroundColor Yellow
                 
-                # Count unique statistics for this guardpoint
-                $userCount = ($guardPointEntries | Select-Object -Property UserName, UserDomain -Unique).Count
+                # Get users for this guardpoint first
+                $users = $guardPointEntries | Group-Object -Property UserName, UserDomain | Sort-Object Count -Descending
+                
+                # Count only unique users that will be displayed
+                $displayedUsers = @($users | Where-Object { $_.Count -gt 0 })
+                
+                # Calculate statistics
+                $userCount = $displayedUsers.Count
                 $processCount = ($guardPointEntries | Select-Object -Property ProcessName -Unique).Count
                 $resourceCount = ($guardPointEntries | Select-Object -Property ResourcePath -Unique).Count
                 
@@ -396,9 +402,8 @@ class LogModel {
                 
                 # 1. USERS section for this guardpoint
                 Write-Host "`n  Users:" -ForegroundColor White
-                $users = $guardPointEntries | Group-Object -Property UserName, UserDomain | Sort-Object Count -Descending
                 
-                foreach ($user in $users | Select-Object -First $script:MAX_ITEMS_TO_DISPLAY) {
+                foreach ($user in $displayedUsers | Select-Object -First $script:MAX_ITEMS_TO_DISPLAY) {
                     # Get raw value for parsing
                     $rawUserName = $user.Name
                     
@@ -635,6 +640,8 @@ class LogModel {
                                             foreach ($group in $domainGroupList) {
                                                 # Clean up any extra backslashes in group names
                                                 $cleanGroup = $group -replace '\\+', '\'
+                                                # Remove leading backslash
+                                                $cleanGroup = $cleanGroup -replace '^\\', ''
                                                 Write-Host "            $($script:UNICODE_BULLET) $cleanGroup" -ForegroundColor DarkGray
                                             }
                                         }
@@ -665,8 +672,8 @@ class LogModel {
                     }
                 }
                 
-                if ($users.Count -gt $script:MAX_ITEMS_TO_DISPLAY) {
-                    Write-Host "    $($script:UNICODE_BULLET) ... and $($users.Count - $script:MAX_ITEMS_TO_DISPLAY) more users" -ForegroundColor DarkGray
+                if ($displayedUsers.Count -gt $script:MAX_ITEMS_TO_DISPLAY) {
+                    Write-Host "    $($script:UNICODE_BULLET) ... and $($displayedUsers.Count - $script:MAX_ITEMS_TO_DISPLAY) more users" -ForegroundColor DarkGray
                 }
                 
                 # 2. PROCESSES section for this guardpoint
