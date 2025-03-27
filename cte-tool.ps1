@@ -12,17 +12,29 @@
     Path to the log file or directory containing log files.
     Default: C:\ProgramData\Vormetric\DataSecurityExpert\agent\log\vorvmd.log
 
+.PARAMETER All
+    When specified, processes INFO labeled access logs instead of LEARN MODE logs.
+    By default, only LEARN MODE logs are processed.
+
 .EXAMPLE
     .\cte-tool.ps1
-    Processes default log file and displays users and processes that accessed guarded resources.
+    Processes default log file and displays users and processes that accessed guarded resources (LEARN MODE only).
 
 .EXAMPLE
     .\cte-tool.ps1 -LogPath "C:\Logs\vorvmd.log"
-    Processes a specific log file and displays users and processes that accessed guarded resources.
+    Processes a specific log file and displays users and processes that accessed guarded resources (LEARN MODE only).
 
 .EXAMPLE
     .\cte-tool.ps1 -LogPath "C:\ProgramData\Vormetric\DataSecurityExpert\agent\log"
-    Processes all log files in the specified directory and displays users and processes that accessed guarded resources.
+    Processes all log files in the specified directory and displays users and processes that accessed guarded resources (LEARN MODE only).
+
+.EXAMPLE
+    .\cte-tool.ps1 -All
+    Processes all log files in the default directory including only INFO labeled access logs.
+
+.EXAMPLE
+    .\cte-tool.ps1 -LogPath "C:\Logs\vorvmd.log" -All
+    Processes a specific log file including only INFO labeled access logs.
 
 .NOTES
     Author: CTE Tool
@@ -31,7 +43,9 @@
 
 param (
     [ValidateNotNullOrEmpty()]
-    [string]$logpath = "C:\ProgramData\Vormetric\DataSecurityExpert\agent\log"
+    [string]$logpath = "C:\ProgramData\Vormetric\DataSecurityExpert\agent\log",
+    
+    [switch]$all
 )
 
 # =========================== CONSTANTS ===========================
@@ -800,7 +814,7 @@ $script:LogLineRegex = [regex]::new(@'
 \[[\w\s]+\]\s+
 \[(?<PID>\d+)\]\s+
 \[[\w\s]+\]\s+
-\[(?<TYPE>LEARN\sMODE|AUDIT)\]\s+
+\[(?<TYPE>LEARN\sMODE|AUDIT|INFO)\]\s+
 Policy\[(?<POLICY>[\w-]+)\]\s+
 User\[(?<USER>[^\]]+)\]\s+
 Process\[(?<PROCESS>[^\]]+)\]\s+
@@ -839,9 +853,11 @@ function Parse-LogLine {
             return $false
         }
         
-        # FILTER: Only process LEARN MODE entries
+        # Check entry type based on the -all parameter
         $entryType = $match.Groups['TYPE'].Value
-        if ($entryType -ne "LEARN MODE") {
+        
+        # If -all is specified, only process INFO logs; otherwise only process LEARN MODE logs
+        if (($all -and $entryType -ne "INFO") -or (-not $all -and $entryType -ne "LEARN MODE")) {
             return $false
         }
 
@@ -1105,7 +1121,12 @@ function Format-UserDomain {
 # =========================== MAIN SCRIPT ===========================
 
 # Process the log file(s) with simplified header
-Write-Host "`n=== CTE Tool - Log File Access Analyzer (LEARN MODE ONLY) ===" -ForegroundColor Cyan
+Write-Host "`n=== CTE Tool - Log File Access Analyzer ===" -ForegroundColor Cyan
+if ($all) {
+    Write-Host "Mode: Processing INFO labeled logs only" -ForegroundColor Cyan
+} else {
+    Write-Host "Mode: Processing LEARN MODE logs only (use -all to process INFO logs instead)" -ForegroundColor Cyan
+}
 
 # Verify the log path exists before attempting to process
 if (-not (Test-Path -Path $logpath -PathType Container)) {
