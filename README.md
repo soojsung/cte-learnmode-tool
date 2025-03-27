@@ -1,6 +1,6 @@
 # CTE Tool
 
-CTE Tool is a PowerShell utility for analysing CipherTrust Transparent Encryption (CTE) agent logs on Windows and providing detailed information about users and processes that have accessed guarded resources. The tool specifically focuses on LEARN MODE logs, helping administrators determine access patterns before applying enforcement policies.
+CTE Tool is a PowerShell utility for analysing CipherTrust Transparent Encryption (CTE) agent logs on Windows and providing detailed information about users and processes that have accessed guarded resources. The tool can analyze both LEARN MODE logs and INFO labeled logs, helping administrators determine access patterns before applying enforcement policies.
 
 ## Overview
 
@@ -14,6 +14,7 @@ This tool helps security administrators analyse access to resources protected by
 ## Features
 
 - Automatic processing of all CTE agent log files in a directory
+- Option to analyze either LEARN MODE logs (default) or INFO labeled logs
 - Guardpoint-centric organization for easier policy development
 - Comprehensive breakdown of user, process, and resource access
 - Classification of access actions (reading, writing, creating, etc.)
@@ -29,13 +30,13 @@ This tool helps security administrators analyse access to resources protected by
 
 - Windows operating system
 - PowerShell 5.0 or newer
-- Access to CTE agent log files with LEARN MODE entries
+- Access to CTE agent log files with LEARN MODE or INFO entries
 
 ## Usage
 
 ### Basic Usage
 
-Run the script without parameters to process the default log directory:
+Run the script without parameters to process the default log directory (LEARN MODE logs only):
 
 ```powershell
 .\cte-tool.ps1
@@ -43,12 +44,26 @@ Run the script without parameters to process the default log directory:
 
 This will analyse all matching log files (`vorvmd*.log*`) in the default directory `C:\ProgramData\Vormetric\DataSecurityExpert\agent\log`.
 
+### Analyzing INFO Logs
+
+To analyze INFO labeled logs instead of LEARN MODE logs:
+
+```powershell
+.\cte-tool.ps1 -all
+```
+
 ### Specifying a Custom Log Directory
 
 To analyse logs in a different directory:
 
 ```powershell
 .\cte-tool.ps1 -logpath "C:\path\to\log\directory"
+```
+
+To analyse INFO logs in a different directory:
+
+```powershell
+.\cte-tool.ps1 -logpath "C:\path\to\log\directory" -all
 ```
 
 > **Note:** The `-logpath` parameter must specify a directory containing log files, not a specific file.
@@ -136,7 +151,7 @@ The tool provides an overall summary of activity:
 ## How It Works
 
 1. The tool finds all CTE log files in the specified directory
-2. It extracts information from LEARN MODE log entries only
+2. It extracts information from LEARN MODE log entries by default, or INFO log entries if `-all` is specified
 3. The script identifies guardpoint folders from resource paths with intelligent detection
 4. User and group information is parsed and categorized
 5. Access information is grouped by guardpoint with detailed statistics
@@ -171,7 +186,7 @@ If no log files are found, verify you're pointing to the correct directory conta
 
 If the tool runs but shows no data, verify:
 - The log files contain CTE agent logs
-- There are LEARN MODE entries in the logs (not just AUDIT entries)
+- There are entries of the type you're looking for (LEARN MODE or INFO, depending on whether you used the `-all` parameter)
 - The files are readable by your user account
 
 ### Access Permission Issues
